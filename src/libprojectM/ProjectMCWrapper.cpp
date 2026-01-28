@@ -460,7 +460,6 @@ template<class BufferType>
 static auto PcmAdd(projectm_handle instance, const BufferType* samples, unsigned int count, projectm_channels channels) -> void
 {
     auto* projectMInstance = handle_to_instance(instance);
-
     projectMInstance->PCM().Add(samples, channels, count);
 }
 

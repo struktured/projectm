@@ -28,6 +28,8 @@
 
 #include <Audio/PCM.hpp>
 
+#include <mutex>
+
 #include <Renderer/CopyTexture.hpp>
 #include <Renderer/PresetTransition.hpp>
 #include <Renderer/ShaderCache.hpp>
@@ -59,6 +61,7 @@ void ProjectM::PresetSwitchFailedEvent(const std::string&, const std::string&) c
 
 void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTransition)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     try
     {
         m_textureManager->PurgeTextures();
@@ -73,6 +76,7 @@ void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTran
 
 void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     try
     {
         m_textureManager->PurgeTextures();
@@ -87,6 +91,7 @@ void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
 
 void ProjectM::SetTexturePaths(std::vector<std::string> texturePaths)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     m_textureSearchPaths = std::move(texturePaths);
     m_textureManager = std::make_unique<Renderer::TextureManager>(m_textureSearchPaths);
     if (m_textureLoadCallback)
@@ -97,6 +102,7 @@ void ProjectM::SetTexturePaths(std::vector<std::string> texturePaths)
 
 void ProjectM::ResetTextures()
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     m_textureManager = std::make_unique<Renderer::TextureManager>(m_textureSearchPaths);
     if (m_textureLoadCallback)
     {
@@ -115,6 +121,8 @@ void ProjectM::SetTextureLoadCallback(Renderer::TextureLoadCallback callback)
 
 void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
+
     // Don't render if window area is zero.
     if (m_windowWidth == 0 || m_windowHeight == 0)
     {
@@ -212,8 +220,15 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
         m_textureCopier->Draw(*renderContext.shaderCache, m_activePreset->OutputTexture(), false, false);
     }
 
-    // Draw user sprites
-    m_spriteManager->Draw(audioData, renderContext, targetFramebufferObject, {m_activePreset, m_transitioningPreset});
+    // Draw user sprites - only pass non-null presets to avoid dereferencing nullptr
+    if (m_transitioningPreset)
+    {
+        m_spriteManager->Draw(audioData, renderContext, targetFramebufferObject, {m_activePreset, m_transitioningPreset});
+    }
+    else
+    {
+        m_spriteManager->Draw(audioData, renderContext, targetFramebufferObject, {m_activePreset});
+    }
 
     m_frameCount++;
     m_previousFrameVolume = audioData.vol;
@@ -280,7 +295,7 @@ void ProjectM::LoadIdlePreset()
 
 void ProjectM::SetWindowSize(uint32_t width, uint32_t height)
 {
-    /** Stash the new dimensions */
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     m_windowWidth = width;
     m_windowHeight = height;
 }
@@ -368,6 +383,7 @@ auto ProjectM::UserSpriteIdentifiers() const -> std::vector<uint32_t>
 
 void ProjectM::BurnInTexture(uint32_t openGlTextureId, int left, int top, int width, int height)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     if (m_activePreset)
     {
         m_activePreset->BindFramebuffer();
@@ -385,8 +401,7 @@ void ProjectM::BurnInTexture(uint32_t openGlTextureId, int left, int top, int wi
 
 void ProjectM::SetPresetLocked(bool locked)
 {
-    // ToDo: Add a preset switch timer separate from the display timer and reset to 0 when
-    //       disabling the preset switch lock.
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     m_presetLocked = locked;
     m_presetChangeNotified = locked;
 }
@@ -551,6 +566,11 @@ void ProjectM::SetTexelOffsets(float texelOffsetX, float texelOffsetY)
 auto ProjectM::PCM() -> libprojectM::Audio::PCM&
 {
     return m_audioStorage;
+}
+
+auto ProjectM::RenderMutex() -> std::recursive_mutex&
+{
+    return m_renderMutex;
 }
 
 void ProjectM::Touch(float, float, int, int)

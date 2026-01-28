@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <istream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -222,6 +223,14 @@ public:
 
     auto PCM() -> Audio::PCM&;
 
+    /**
+     * @brief Returns a reference to the render mutex for external synchronization.
+     *
+     * This mutex must be held when calling any method that modifies or reads projectM state
+     * from a thread other than the render thread (e.g., loading presets, adding PCM data).
+     */
+    auto RenderMutex() -> std::recursive_mutex&;
+
     auto WindowWidth() -> int;
 
     auto WindowHeight() -> int;
@@ -318,6 +327,8 @@ private:
     bool m_presetLocked{false};         //!< If true, the preset change event will not be sent.
     bool m_presetChangeNotified{false}; //!< Stores whether the user has been notified that projectM wants to switch the preset.
     bool m_presetStartClean{false};     //!< If true, new presets start with a black canvas instead of the previous frame.
+
+    std::recursive_mutex m_renderMutex; //!< Protects all projectM state from concurrent access across threads.
 
     std::unique_ptr<PresetFactoryManager> m_presetFactoryManager; //!< Provides access to all available preset factories.
 
