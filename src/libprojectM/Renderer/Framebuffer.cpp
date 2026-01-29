@@ -92,9 +92,21 @@ bool Framebuffer::SetSize(int width, int height)
     for (auto& attachments : m_attachments)
     {
         Bind(attachments.first);
+        // First detach all textures from framebuffer before destroying them.
+        // The GL driver keeps internal references to attached textures, so we must
+        // detach before deleting to avoid use-after-free in driver memory.
+        for (auto& texture : attachments.second)
+        {
+            glFramebufferTexture2D(GL_FRAMEBUFFER, texture.first, GL_TEXTURE_2D, 0, 0);
+        }
+        // Now safe to resize (which destroys old textures and creates new ones)
         for (auto& texture : attachments.second)
         {
             texture.second->SetSize(width, height);
+        }
+        // Reattach the new textures
+        for (auto& texture : attachments.second)
+        {
             glFramebufferTexture2D(GL_FRAMEBUFFER, texture.first, GL_TEXTURE_2D, texture.second->Texture()->TextureID(), 0);
         }
     }
