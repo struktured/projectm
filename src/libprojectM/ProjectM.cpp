@@ -29,6 +29,7 @@
 #include <Audio/PCM.hpp>
 
 #include <mutex>
+#include <iostream>
 
 #include <Renderer/CopyTexture.hpp>
 #include <Renderer/PresetTransition.hpp>
@@ -166,9 +167,13 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
     {
         if (m_transition->IsDone(m_timeKeeper->GetFrameTime()))
         {
+            std::cerr << "Transition complete, destroying old preset: " << m_activePreset->Filename() << std::endl;
+            // Ensure all GL commands complete BEFORE destroying old preset
+            glFinish();
             m_activePreset = std::move(m_transitioningPreset);
             m_transitioningPreset.reset();
             m_transition.reset();
+            std::cerr << "New active preset: " << m_activePreset->Filename() << std::endl;
         }
         else
         {
@@ -285,8 +290,12 @@ void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hard
     // If already in a transition, force immediate completion.
     if (m_transitioningPreset != nullptr)
     {
+        std::cerr << "Forcing transition completion, destroying old active preset: " << m_activePreset->Filename() << std::endl;
+        // Ensure all GL commands complete BEFORE destroying old preset
+        glFinish();
         m_activePreset = std::move(m_transitioningPreset);
         m_transition.reset();
+        std::cerr << "Force promoted transitioning preset: " << m_activePreset->Filename() << std::endl;
     }
 
     if (m_activePreset)
@@ -296,7 +305,14 @@ void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hard
 
     if (hardCut)
     {
+        if (m_activePreset)
+        {
+            std::cerr << "Hard cut, destroying old preset: " << m_activePreset->Filename() << std::endl;
+            // Ensure all GL commands complete BEFORE destroying old preset
+            glFinish();
+        }
         m_activePreset = std::move(preset);
+        std::cerr << "Hard cut, new active preset: " << m_activePreset->Filename() << std::endl;
         m_timeKeeper->StartPreset();
     }
     else
