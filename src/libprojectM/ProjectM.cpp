@@ -28,6 +28,8 @@
 
 #include <Audio/PCM.hpp>
 
+#include <mutex>
+
 #include <Renderer/CopyTexture.hpp>
 #include <Renderer/PresetTransition.hpp>
 #include <Renderer/ShaderCache.hpp>
@@ -59,6 +61,12 @@ void ProjectM::PresetSwitchFailedEvent(const std::string&, const std::string&) c
 
 void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTransition)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
+    LoadPresetFileUnlocked(presetFilename, smoothTransition);
+}
+
+void ProjectM::LoadPresetFileUnlocked(const std::string& presetFilename, bool smoothTransition)
+{
     try
     {
         m_textureManager->PurgeTextures();
@@ -72,6 +80,12 @@ void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTran
 }
 
 void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
+    LoadPresetDataUnlocked(presetData, smoothTransition);
+}
+
+void ProjectM::LoadPresetDataUnlocked(std::istream& presetData, bool smoothTransition)
 {
     try
     {
@@ -87,6 +101,7 @@ void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
 
 void ProjectM::SetTexturePaths(std::vector<std::string> texturePaths)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     m_textureSearchPaths = std::move(texturePaths);
     m_textureManager = std::make_unique<Renderer::TextureManager>(m_textureSearchPaths);
     if (m_textureLoadCallback)
@@ -97,6 +112,7 @@ void ProjectM::SetTexturePaths(std::vector<std::string> texturePaths)
 
 void ProjectM::ResetTextures()
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     m_textureManager = std::make_unique<Renderer::TextureManager>(m_textureSearchPaths);
     if (m_textureLoadCallback)
     {
@@ -115,6 +131,8 @@ void ProjectM::SetTextureLoadCallback(Renderer::TextureLoadCallback callback)
 
 void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
+
     // Don't render if window area is zero.
     if (m_windowWidth == 0 || m_windowHeight == 0)
     {
@@ -175,9 +193,13 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
     {
         if (m_transition->IsDone(m_timeKeeper->GetFrameTime()))
         {
+            LOG_DEBUG("[ProjectM] Transition complete, destroying old preset: " + m_activePreset->Filename());
+            // Ensure all GL commands complete BEFORE destroying old preset
+            glFinish();
             m_activePreset = std::move(m_transitioningPreset);
             m_transitioningPreset.reset();
             m_transition.reset();
+            LOG_DEBUG("[ProjectM] New active preset: " + m_activePreset->Filename());
         }
         else
         {
@@ -200,8 +222,15 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
         m_textureCopier->Draw(*renderContext.shaderCache, m_activePreset->OutputTexture(), false, false);
     }
 
-    // Draw user sprites
-    m_spriteManager->Draw(audioData, renderContext, targetFramebufferObject, {m_activePreset, m_transitioningPreset});
+    // Draw user sprites - only pass non-null presets to avoid dereferencing nullptr
+    if (m_transitioningPreset)
+    {
+        m_spriteManager->Draw(audioData, renderContext, targetFramebufferObject, {m_activePreset, m_transitioningPreset});
+    }
+    else
+    {
+        m_spriteManager->Draw(audioData, renderContext, targetFramebufferObject, {m_activePreset});
+    }
 
     m_frameCount++;
     m_previousFrameVolume = audioData.vol;
@@ -262,13 +291,16 @@ void ProjectM::CheckGLSLVersion()
 
 void ProjectM::LoadIdlePreset()
 {
-    LoadPresetFile("idle://Geiss & Sperl - Feedback (projectM idle HDR mix).milk", false);
+    // Called from Initialize() (single-threaded, no lock needed) and from
+    // RenderFrame() (which already holds m_renderMutex). Using the Unlocked
+    // variant avoids recursive deadlock while keeping both call sites safe.
+    LoadPresetFileUnlocked("idle://Geiss & Sperl - Feedback (projectM idle HDR mix).milk", false);
     assert(m_activePreset);
 }
 
 void ProjectM::SetWindowSize(uint32_t width, uint32_t height)
 {
-    /** Stash the new dimensions */
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     m_windowWidth = width;
     m_windowHeight = height;
 }
@@ -287,8 +319,15 @@ void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hard
     // If already in a transition, force immediate completion.
     if (m_transitioningPreset != nullptr)
     {
+        if (m_activePreset)
+        {
+            LOG_DEBUG("[ProjectM] Forcing transition completion, destroying old active preset: " + m_activePreset->Filename());
+        }
+        // Ensure all GL commands complete BEFORE destroying old preset
+        glFinish();
         m_activePreset = std::move(m_transitioningPreset);
         m_transition.reset();
+        LOG_DEBUG("[ProjectM] Force promoted transitioning preset: " + m_activePreset->Filename());
     }
 
     if (m_activePreset && !m_presetStartClean)
@@ -298,7 +337,14 @@ void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hard
 
     if (hardCut)
     {
+        if (m_activePreset)
+        {
+            LOG_DEBUG("[ProjectM] Hard cut, destroying old preset: " + m_activePreset->Filename());
+            // Ensure all GL commands complete BEFORE destroying old preset
+            glFinish();
+        }
         m_activePreset = std::move(preset);
+        LOG_DEBUG("[ProjectM] Hard cut, new active preset: " + m_activePreset->Filename());
         m_timeKeeper->StartPreset();
     }
     else
@@ -356,6 +402,7 @@ auto ProjectM::UserSpriteIdentifiers() const -> std::vector<uint32_t>
 
 void ProjectM::BurnInTexture(uint32_t openGlTextureId, int left, int top, int width, int height)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     if (m_activePreset)
     {
         m_activePreset->BindFramebuffer();
@@ -373,8 +420,7 @@ void ProjectM::BurnInTexture(uint32_t openGlTextureId, int left, int top, int wi
 
 void ProjectM::SetPresetLocked(bool locked)
 {
-    // ToDo: Add a preset switch timer separate from the display timer and reset to 0 when
-    //       disabling the preset switch lock.
+    std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
     m_presetLocked = locked;
     m_presetChangeNotified = locked;
 }
@@ -539,6 +585,11 @@ void ProjectM::SetTexelOffsets(float texelOffsetX, float texelOffsetY)
 auto ProjectM::PCM() -> libprojectM::Audio::PCM&
 {
     return m_audioStorage;
+}
+
+auto ProjectM::RenderMutex() -> std::recursive_mutex&
+{
+    return m_renderMutex;
 }
 
 void ProjectM::Touch(float, float, int, int)

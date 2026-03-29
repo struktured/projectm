@@ -30,6 +30,7 @@
 #include <cstdint>
 #include <istream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -222,6 +223,19 @@ public:
 
     auto PCM() -> Audio::PCM&;
 
+    /**
+     * @brief Returns a reference to the render mutex for external synchronization.
+     *
+     * Frontend applications that drive projectM from multiple threads (e.g., a Qt paint
+     * thread and an audio callback thread) must hold this mutex when calling any method
+     * that modifies projectM state concurrently with RenderFrame(). Methods that already
+     * acquire the lock internally (LoadPresetFile, SetWindowSize, etc.) do not require
+     * the caller to hold this mutex.
+     *
+     * @note This is a recursive_mutex, so it is safe to call locking methods while holding it.
+     */
+    auto RenderMutex() -> std::recursive_mutex&;
+
     auto WindowWidth() -> int;
 
     auto WindowHeight() -> int;
@@ -290,6 +304,10 @@ private:
 
     void LoadIdlePreset();
 
+    void LoadPresetFileUnlocked(const std::string& presetFilename, bool smoothTransition);
+
+    void LoadPresetDataUnlocked(std::istream& presetData, bool smoothTransition);
+
     auto GetRenderContext() -> Renderer::RenderContext;
 
     uint32_t m_meshX{32};            //!< Per-point mesh horizontal resolution.
@@ -318,6 +336,8 @@ private:
     bool m_presetLocked{false};         //!< If true, the preset change event will not be sent.
     bool m_presetChangeNotified{false}; //!< Stores whether the user has been notified that projectM wants to switch the preset.
     bool m_presetStartClean{false};     //!< If true, new presets start with a black canvas instead of the previous frame.
+
+    std::recursive_mutex m_renderMutex; //!< Protects all projectM state from concurrent access across threads.
 
     std::unique_ptr<PresetFactoryManager> m_presetFactoryManager; //!< Provides access to all available preset factories.
 
