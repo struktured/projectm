@@ -291,6 +291,9 @@ void ProjectM::CheckGLSLVersion()
 
 void ProjectM::LoadIdlePreset()
 {
+    // Called from Initialize() (single-threaded, no lock needed) and from
+    // RenderFrame() (which already holds m_renderMutex). Using the Unlocked
+    // variant avoids recursive deadlock while keeping both call sites safe.
     LoadPresetFileUnlocked("idle://Geiss & Sperl - Feedback (projectM idle HDR mix).milk", false);
     assert(m_activePreset);
 }
@@ -316,7 +319,10 @@ void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hard
     // If already in a transition, force immediate completion.
     if (m_transitioningPreset != nullptr)
     {
-        LOG_DEBUG("[ProjectM] Forcing transition completion, destroying old active preset: " + m_activePreset->Filename());
+        if (m_activePreset)
+        {
+            LOG_DEBUG("[ProjectM] Forcing transition completion, destroying old active preset: " + m_activePreset->Filename());
+        }
         // Ensure all GL commands complete BEFORE destroying old preset
         glFinish();
         m_activePreset = std::move(m_transitioningPreset);

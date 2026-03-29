@@ -226,8 +226,13 @@ public:
     /**
      * @brief Returns a reference to the render mutex for external synchronization.
      *
-     * This mutex must be held when calling any method that modifies or reads projectM state
-     * from a thread other than the render thread (e.g., loading presets, adding PCM data).
+     * Frontend applications that drive projectM from multiple threads (e.g., a Qt paint
+     * thread and an audio callback thread) must hold this mutex when calling any method
+     * that modifies projectM state concurrently with RenderFrame(). Methods that already
+     * acquire the lock internally (LoadPresetFile, SetWindowSize, etc.) do not require
+     * the caller to hold this mutex.
+     *
+     * @note This is a recursive_mutex, so it is safe to call locking methods while holding it.
      */
     auto RenderMutex() -> std::recursive_mutex&;
 
