@@ -24,7 +24,19 @@ Framebuffer::~Framebuffer()
 {
     if (!m_framebufferIds.empty())
     {
-        // Delete attached textures first
+        // Detach all textures from each framebuffer before destroying them.
+        // The GL driver keeps internal references to attached textures, so we must
+        // detach before deleting to avoid use-after-free in driver memory.
+        for (auto& [index, attachments] : m_attachments)
+        {
+            glBindFramebuffer(GL_FRAMEBUFFER, m_framebufferIds.at(index));
+            for (auto& [type, _] : attachments)
+            {
+                glFramebufferTexture2D(GL_FRAMEBUFFER, type, GL_TEXTURE_2D, 0, 0);
+            }
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
         m_attachments.clear();
 
         glDeleteFramebuffers(static_cast<int>(m_framebufferIds.size()), m_framebufferIds.data());

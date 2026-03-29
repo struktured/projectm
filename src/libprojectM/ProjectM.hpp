@@ -299,6 +299,10 @@ private:
 
     void LoadIdlePreset();
 
+    void LoadPresetFileUnlocked(const std::string& presetFilename, bool smoothTransition);
+
+    void LoadPresetDataUnlocked(std::istream& presetData, bool smoothTransition);
+
     auto GetRenderContext() -> Renderer::RenderContext;
 
     uint32_t m_meshX{32};            //!< Per-point mesh horizontal resolution.

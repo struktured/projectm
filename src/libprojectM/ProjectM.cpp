@@ -29,7 +29,6 @@
 #include <Audio/PCM.hpp>
 
 #include <mutex>
-#include <iostream>
 
 #include <Renderer/CopyTexture.hpp>
 #include <Renderer/PresetTransition.hpp>
@@ -63,6 +62,11 @@ void ProjectM::PresetSwitchFailedEvent(const std::string&, const std::string&) c
 void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTransition)
 {
     std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
+    LoadPresetFileUnlocked(presetFilename, smoothTransition);
+}
+
+void ProjectM::LoadPresetFileUnlocked(const std::string& presetFilename, bool smoothTransition)
+{
     try
     {
         m_textureManager->PurgeTextures();
@@ -78,6 +82,11 @@ void ProjectM::LoadPresetFile(const std::string& presetFilename, bool smoothTran
 void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
 {
     std::lock_guard<std::recursive_mutex> lock(m_renderMutex);
+    LoadPresetDataUnlocked(presetData, smoothTransition);
+}
+
+void ProjectM::LoadPresetDataUnlocked(std::istream& presetData, bool smoothTransition)
+{
     try
     {
         m_textureManager->PurgeTextures();
@@ -184,13 +193,13 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
     {
         if (m_transition->IsDone(m_timeKeeper->GetFrameTime()))
         {
-            std::cerr << "Transition complete, destroying old preset: " << m_activePreset->Filename() << std::endl;
+            LOG_DEBUG("[ProjectM] Transition complete, destroying old preset: " + m_activePreset->Filename());
             // Ensure all GL commands complete BEFORE destroying old preset
             glFinish();
             m_activePreset = std::move(m_transitioningPreset);
             m_transitioningPreset.reset();
             m_transition.reset();
-            std::cerr << "New active preset: " << m_activePreset->Filename() << std::endl;
+            LOG_DEBUG("[ProjectM] New active preset: " + m_activePreset->Filename());
         }
         else
         {
@@ -282,7 +291,7 @@ void ProjectM::CheckGLSLVersion()
 
 void ProjectM::LoadIdlePreset()
 {
-    LoadPresetFile("idle://Geiss & Sperl - Feedback (projectM idle HDR mix).milk", false);
+    LoadPresetFileUnlocked("idle://Geiss & Sperl - Feedback (projectM idle HDR mix).milk", false);
     assert(m_activePreset);
 }
 
@@ -307,12 +316,12 @@ void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hard
     // If already in a transition, force immediate completion.
     if (m_transitioningPreset != nullptr)
     {
-        std::cerr << "Forcing transition completion, destroying old active preset: " << m_activePreset->Filename() << std::endl;
+        LOG_DEBUG("[ProjectM] Forcing transition completion, destroying old active preset: " + m_activePreset->Filename());
         // Ensure all GL commands complete BEFORE destroying old preset
         glFinish();
         m_activePreset = std::move(m_transitioningPreset);
         m_transition.reset();
-        std::cerr << "Force promoted transitioning preset: " << m_activePreset->Filename() << std::endl;
+        LOG_DEBUG("[ProjectM] Force promoted transitioning preset: " + m_activePreset->Filename());
     }
 
     if (m_activePreset && !m_presetStartClean)
@@ -324,12 +333,12 @@ void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hard
     {
         if (m_activePreset)
         {
-            std::cerr << "Hard cut, destroying old preset: " << m_activePreset->Filename() << std::endl;
+            LOG_DEBUG("[ProjectM] Hard cut, destroying old preset: " + m_activePreset->Filename());
             // Ensure all GL commands complete BEFORE destroying old preset
             glFinish();
         }
         m_activePreset = std::move(preset);
-        std::cerr << "Hard cut, new active preset: " << m_activePreset->Filename() << std::endl;
+        LOG_DEBUG("[ProjectM] Hard cut, new active preset: " + m_activePreset->Filename());
         m_timeKeeper->StartPreset();
     }
     else
