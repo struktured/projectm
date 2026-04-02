@@ -24,23 +24,11 @@ Framebuffer::~Framebuffer()
 {
     if (!m_framebufferIds.empty())
     {
-        // Detach all textures from each framebuffer before destroying them.
-        // The GL driver keeps internal references to attached textures, so we must
-        // detach before deleting to avoid use-after-free in driver memory.
-        for (auto& [index, attachments] : m_attachments)
-        {
-            glBindFramebuffer(GL_FRAMEBUFFER, m_framebufferIds.at(index));
-            for (auto& [type, _] : attachments)
-            {
-                glFramebufferTexture2D(GL_FRAMEBUFFER, type, GL_TEXTURE_2D, 0, 0);
-            }
-        }
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-        m_attachments.clear();
-
+        // Delete FBOs first — this also releases driver references to attached textures.
         glDeleteFramebuffers(static_cast<int>(m_framebufferIds.size()), m_framebufferIds.data());
         m_framebufferIds.clear();
+
+        m_attachments.clear();
     }
 }
 
@@ -104,21 +92,11 @@ bool Framebuffer::SetSize(int width, int height)
     for (auto& attachments : m_attachments)
     {
         Bind(attachments.first);
-        // First detach all textures from framebuffer before destroying them.
-        // The GL driver keeps internal references to attached textures, so we must
-        // detach before deleting to avoid use-after-free in driver memory.
         for (auto& texture : attachments.second)
         {
+            // Detach old texture, resize (destroys old and creates new), reattach new.
             glFramebufferTexture2D(GL_FRAMEBUFFER, texture.first, GL_TEXTURE_2D, 0, 0);
-        }
-        // Now safe to resize (which destroys old textures and creates new ones)
-        for (auto& texture : attachments.second)
-        {
             texture.second->SetSize(width, height);
-        }
-        // Reattach the new textures
-        for (auto& texture : attachments.second)
-        {
             glFramebufferTexture2D(GL_FRAMEBUFFER, texture.first, GL_TEXTURE_2D, texture.second->Texture()->TextureID(), 0);
         }
     }
