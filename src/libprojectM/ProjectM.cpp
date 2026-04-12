@@ -40,6 +40,24 @@
 
 namespace libprojectM {
 
+/**
+ * @brief Inserts a GPU fence and waits for prior GL commands to complete.
+ *
+ * The GL spec does not guarantee that in-flight GPU commands retain references to
+ * deleted texture/shader resources. Calling this before destroying a preset ensures
+ * the GPU has finished reading its GL objects. Uses glFenceSync (GL 3.2+) to avoid
+ * the full pipeline stall of glFinish.
+ */
+static void WaitForGPU()
+{
+    auto fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (fence)
+    {
+        glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, 50000000); // 50ms timeout
+        glDeleteSync(fence);
+    }
+}
+
 ProjectM::ProjectM()
     : m_presetFactoryManager(std::make_unique<PresetFactoryManager>())
 {
@@ -183,6 +201,7 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
     {
         if (m_transition->IsDone(m_timeKeeper->GetFrameTime()))
         {
+            WaitForGPU();
             m_activePreset = std::move(m_transitioningPreset);
             m_transitioningPreset.reset();
             m_transition.reset();
@@ -314,6 +333,7 @@ void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hard
     // If already in a transition, force immediate completion.
     if (m_transitioningPreset != nullptr)
     {
+        WaitForGPU();
         m_activePreset = std::move(m_transitioningPreset);
         m_transition.reset();
     }
@@ -325,6 +345,7 @@ void ProjectM::StartPresetTransition(std::unique_ptr<Preset>&& preset, bool hard
 
     if (hardCut)
     {
+        WaitForGPU();
         m_activePreset = std::move(preset);
         m_timeKeeper->StartPreset();
     }
